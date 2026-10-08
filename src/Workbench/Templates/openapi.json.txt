@@ -1,0 +1,85 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Bounded URL Shortener Prototype",
+    "version": "1.0.0",
+    "description": "Local single-user prototype. Expiration and branded aliases depend on the approved requirement flags in LinkRules. No personal analytics."
+  },
+  "servers": [{ "url": "http://127.0.0.1:5190" }],
+  "paths": {
+    "/health": {
+      "get": {
+        "responses": { "200": { "description": "API is running" } }
+      }
+    },
+    "/api/links": {
+      "post": {
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateLink" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Link created",
+            "headers": { "Location": { "schema": { "type": "string" } } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Link" } } }
+          },
+          "400": { "description": "Invalid URL, unsupported feature, invalid alias or expiration" },
+          "409": { "description": "Alias already exists; original destination is preserved" },
+          "429": { "description": "Creation rate limit reached" },
+          "503": { "description": "Bounded random-code collision retries exhausted" }
+        }
+      }
+    },
+    "/r/{code}": {
+      "parameters": [{ "in": "path", "name": "code", "required": true, "schema": { "type": "string" } }],
+      "get": {
+        "responses": {
+          "302": {
+            "description": "Redirect counted; destination is not fetched",
+            "headers": {
+              "Location": { "schema": { "type": "string", "format": "uri" } },
+              "Cache-Control": { "schema": { "type": "string", "example": "no-store" } }
+            }
+          },
+          "404": { "description": "Code not found" },
+          "410": { "description": "Expired; click count not incremented" }
+        }
+      }
+    },
+    "/api/links/{code}/stats": {
+      "parameters": [{ "in": "path", "name": "code", "required": true, "schema": { "type": "string" } }],
+      "get": {
+        "responses": {
+          "200": { "description": "Aggregate statistics", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Link" } } } },
+          "404": { "description": "Code not found" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CreateLink": {
+        "type": "object",
+        "required": ["url"],
+        "properties": {
+          "url": { "type": "string", "format": "uri", "maxLength": 2048, "description": "Absolute HTTP(S) URI, no user-info credentials" },
+          "alias": { "type": "string", "nullable": true, "pattern": "^[A-Za-z0-9_-]{3,32}$" },
+          "expiresAt": { "type": "string", "format": "date-time", "nullable": true, "description": "Must be in the future at creation; expiry boundary is inclusive" }
+        }
+      },
+      "Link": {
+        "type": "object",
+        "required": ["code", "url", "createdAt", "clicks"],
+        "properties": {
+          "code": { "type": "string" },
+          "url": { "type": "string", "format": "uri" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "expiresAt": { "type": "string", "format": "date-time", "nullable": true },
+          "clicks": { "type": "integer", "minimum": 0 },
+          "lastAccessAt": { "type": "string", "format": "date-time", "nullable": true }
+        }
+      }
+    }
+  }
+}

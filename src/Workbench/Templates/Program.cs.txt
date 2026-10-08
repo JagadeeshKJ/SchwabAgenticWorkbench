@@ -1,0 +1,77 @@
+using System.Net;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
+using Shortener;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.WebHost.UseUrls("http://127.0.0.1:5190");
+builder.Services.AddProblemDetails();
+builder.Services.AddDbContext<LinkDb>(o => o.UseSqlite(
+    $"Data Source={Environment.GetEnvironmentVariable("SHORTENER_DB") ?? "links.db"}"));
+builder.Services.AddScoped<LinkStore>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddRateLimiter(o =>
+{
+    o.RejectionStatusCode = 429;
+    o.AddFixedWindowLimiter("create", l =>
+    {
+        l.PermitLimit = 60;
+        l.Window = TimeSpan.FromMinutes(1);
+        l.QueueLimit = 0;
+    });
+});
+var app = builder.Build();
+// The demo is deliberately loopback-only; no destination requests are made.
+app.Use(async (context, next) =>
+{
+    if (context.Connection.RemoteIpAddress is { } ip && !IPAddress.IsLoopback(ip))
+    {
+        context.Response.StatusCode = 403;
+        return;
+    }
+    await next(context);
+});
+app.UseExceptionHandler();
+app.UseRateLimiter();
+using (var scope = app.Services.CreateScope())
+{
+    scope.ServiceProvider.GetRequiredService<LinkDb>().Database.EnsureCreated();
+}
+app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
+app.MapPost("/api/links", async (CreateLink request, LinkStore store, CancellationToken ct) =>
+{
+    var result = await store.Create(request, ct);
+    return result.Link is null
+        ? Results.Problem(result.Error, statusCode: result.Status)
+        : Results.Created($"/api/links/{result.Link.Code}", result.Link);
+}).RequireRateLimiting("create");
+app.MapGet("/api/links/{code}/stats", async (string code, LinkDb db, CancellationToken ct) =>
+{
+    var link = await db.Links.AsNoTracking().SingleOrDefaultAsync(l => l.Code == code, ct);
+    return link is null ? Results.NotFound() : Results.Ok(link);
+});
+app.MapGet("/r/{code}", async (string code, LinkStore store, HttpContext http, CancellationToken ct) =>
+{
+    http.Response.Headers.CacheControl = "no-store";
+    var result = await store.Resolve(code, ct);
+    return result.Link is null
+        ? Results.Problem(result.Error, statusCode: result.Status)
+        : Results.Redirect(result.Link.Url, permanent: false);
+});
+// CLI --urls can explicitly supply a different LOOPBACK port for the validator.
+if (args.Contains("--urls"))
+{
+    var index = Array.IndexOf(args, "--urls");
+    var value = args.ElementAtOrDefault(index + 1);
+    if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
+        !IPAddress.TryParse(uri.Host, out var address) || !IPAddress.IsLoopback(address))
+        throw new InvalidOperationException("Only loopback URLs are allowed.");
+    app.Urls.Clear();
+    app.Urls.Add(value!);
+}
+app.Run();
+namespace Shortener
+{
+    public sealed record CreateLink(string? Url, string? Alias = null, DateTimeOffset? ExpiresAt = null);
+}

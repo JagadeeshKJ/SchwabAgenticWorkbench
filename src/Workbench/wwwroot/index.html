@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agentic SDLC Workbench</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header><div><h1>Agentic SDLC Workbench</h1><p>URL shortener · governed execution · evidence, not claims</p></div><span class="local">LOCAL PROTOTYPE</span></header>
+<div class="banner">Demo mode generates deterministic templates; Copilot mode uses real model responses. Both require actual build + HTTP validation. No deployment or public publication.</div>
+<main>
+<aside>
+  <h2>Start a scenario</h2>
+  <label>Scenario<select id="scenario"><option value="greenfield">1 · Greenfield shortener</option><option value="brownfield">2 · Brownfield expiration</option><option value="ambiguous">3 · Ambiguous branded links</option></select></label>
+  <label>Agent runtime<select id="provider"><option value="demo">Deterministic demo (no AI account)</option><option value="copilot">Live Copilot (uses your allowance)</option></select></label>
+  <label>Completed greenfield baseline<select id="baseline"><option value="">None</option></select></label>
+  <label>Controlled fault (demo only)<select id="fault"><option value="none">None</option><option value="expiration-once">Expiration defect → repair</option><option value="expiration-always">Persistent defect → rollback / stop</option><option value="provider-once">Transient provider → bounded retry</option></select></label>
+  <button id="create">Create run</button>
+  <h2>Run history</h2><div id="runs"></div>
+  <h3>Overall reliability</h3><div id="overall"></div>
+  <p class="muted">Limits: 3 parallel tasks · 1 repair · 1 provider retry · 24 agent calls · 5 revisions · 2 hours/run.</p>
+</aside>
+<section class="detail">
+  <div id="error" role="alert" hidden></div>
+  <div id="empty"><h2>Select or create a run</h2><p>Start with greenfield. Brownfield reuses its approved source checkpoint. Ambiguous requirements pause for clarification.</p></div>
+  <div id="detail" hidden>
+    <div class="run-head"><div><h2 id="title"></h2><p id="subtitle"></p></div><button id="stop" class="danger">Safe stop + rollback</button></div>
+    <div id="mode"></div>
+    <div id="metrics" class="metrics"></div>
+    <div id="resume-panel" hidden><button id="resume">Resume interrupted run</button></div>
+    <div id="clarification" class="panel" hidden>
+      <h3>Human clarification required</h3><p>Should branded/custom aliases be supported? This MVP rejects collisions with HTTP 409 and stores only aggregate analytics.</p>
+      <label><input type="checkbox" id="clarify-alias"> Enable branded aliases</label>
+      <label>Accepted requirement<textarea id="clarify-text">Create short links with aggregate click statistics. Do not collect personal analytics.</textarea></label>
+      <button id="clarify">Submit clarification</button>
+    </div>
+    <div class="panel"><h3>Requirement revision <span id="revision"></span></h3><p id="requirement"></p>
+      <label>Revised requirement<textarea id="revision-text">Add branded aliases; reject duplicate aliases with 409 and preserve aggregate analytics.</textarea></label>
+      <label><input type="checkbox" id="revision-alias" checked> Enable branded aliases</label>
+      <button id="revise">Revise → invalidate descendants → replan</button>
+      <p class="muted">Old artifacts remain in history; old approvals cannot authorize a new revision.</p>
+    </div>
+    <h3>Dependency graph / execution state</h3><p class="muted">Arrows list exact prerequisite IDs. Implementation, tests and documentation form the parallel branch. All must complete before the join gate.</p>
+    <div id="graph"></div>
+    <div class="panel"><h3>Human approval checkpoints</h3>
+      <label>Operator name<input id="operator" value="Local evaluator" maxlength="80"></label>
+      <label>Decision rationale<input id="note" placeholder="Reviewed scope / source / actual evidence" maxlength="2000"></label>
+      <p class="warning">Execution approval runs generated C# locally. A workspace is not an OS sandbox. Inspect source first. Approvals are bound to the displayed artifact fingerprint.</p>
+      <button id="source">Inspect candidate source</button><div id="approvals"></div>
+    </div>
+    <div class="panel"><h3>Artifacts &amp; validation evidence</h3><div id="artifacts"></div><a id="download" hidden>Download approved local release</a><pre id="preview">Select an artifact or inspect candidate source.</pre></div>
+    <h3>Audit event history</h3><p class="muted">Transactional, per-run hash chain. Review all revisions, attempts, decisions and recovery events.</p><div id="events"></div>
+  </div>
+</section>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

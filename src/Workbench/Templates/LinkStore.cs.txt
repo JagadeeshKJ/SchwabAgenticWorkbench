@@ -1,0 +1,67 @@
+using System.Security.Cryptography;
+using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
+
+namespace Shortener;
+
+public sealed class Link
+{
+    public string Code { get; set; } = "";
+    public string Url { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? ExpiresAt { get; set; }
+    public int Clicks { get; set; }
+    public DateTimeOffset? LastAccessAt { get; set; }
+}
+public sealed class LinkDb(DbContextOptions<LinkDb> options) : DbContext(options)
+{
+    public DbSet<Link> Links => Set<Link>();
+    protected override void OnModelCreating(ModelBuilder builder) =>
+        builder.Entity<Link>().HasKey(x => x.Code);
+}
+public sealed record LinkResult(int Status, Link? Link, string? Error = null);
+public sealed class LinkStore(LinkDb db, TimeProvider time)
+{
+    public async Task<LinkResult> Create(CreateLink input, CancellationToken ct)
+    {
+        if (input.Url is null || input.Url.Length > 2048 ||
+            !Uri.TryCreate(input.Url, UriKind.Absolute, out var uri) ||
+            uri.Scheme is not ("http" or "https") || string.IsNullOrEmpty(uri.Host) ||
+            !string.IsNullOrEmpty(uri.UserInfo))
+            return new(400, null, "An absolute HTTP(S) URL without credentials is required.");
+        if (input.Alias is not null && (!LinkRules.AliasesEnabled ||
+            !Regex.IsMatch(input.Alias, "^[A-Za-z0-9_-]{3,32}$")))
+            return new(400, null, "Aliases must be enabled and contain 3-32 ASCII letters, digits, _ or -.");
+        if (input.ExpiresAt.HasValue && (!LinkRules.ExpirationEnabled ||
+            input.ExpiresAt <= time.GetUtcNow()))
+            return new(400, null, "Expiration must be enabled and in the future.");
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            var link = new Link
+            {
+                Code = input.Alias ?? Convert.ToHexString(RandomNumberGenerator.GetBytes(5)).ToLowerInvariant(),
+                Url = uri.AbsoluteUri, CreatedAt = time.GetUtcNow(), ExpiresAt = input.ExpiresAt
+            };
+            db.Links.Add(link);
+            try { await db.SaveChangesAsync(ct); return new(201, link); }
+            catch (DbUpdateException ex) when (
+                ex.InnerException is Microsoft.Data.Sqlite.SqliteException { SqliteErrorCode: 19 })
+            {
+                db.ChangeTracker.Clear();
+                if (input.Alias is not null) return new(409, null, "Alias already exists.");
+            }
+        }
+        return new(503, null, "Code generation exhausted its bounded collision retry.");
+    }
+    public async Task<LinkResult> Resolve(string code, CancellationToken ct)
+    {
+        var link = await db.Links.AsNoTracking().SingleOrDefaultAsync(l => l.Code == code, ct);
+        if (link is null) return new(404, null, "Short code not found.");
+        var now = time.GetUtcNow();
+        if (LinkRules.IsExpired(link, now)) return new(410, null, "Link expired.");
+        await db.Links.Where(l => l.Code == code).ExecuteUpdateAsync(
+            s => s.SetProperty(l => l.Clicks, l => l.Clicks + 1)
+                .SetProperty(l => l.LastAccessAt, now), ct);
+        return new(302, link);
+    }
+}
