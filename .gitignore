@@ -1,0 +1,8 @@
+**/bin/
+**/obj/
+data/
+.vs/
+*.user
+*.log
+*.zip
+.env
