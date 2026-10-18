@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "public": true,
+  "cleanUrls": true,
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "https://schwab-agentic-workbench.onrender.com/api/$1"
+    },
+    {
+      "src": "/health",
+      "dest": "https://schwab-agentic-workbench.onrender.com/health"
+    },
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/src/Workbench/wwwroot/$1"
+    }
+  ]
+}

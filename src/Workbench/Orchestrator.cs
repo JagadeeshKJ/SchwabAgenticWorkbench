@@ -8,12 +8,17 @@ public sealed class Orchestrator(RunStore store, Workspace workspace, IValidatio
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _running = new();
     private readonly SemaphoreSlim _slots = new(3);
     public bool Ready { get; private set; }
-    public async Task<WorkflowRun> Create(RunRequest request)
+    public bool CopilotEnabled { get; set; } = true;
+    public TimeSpan MaxRunDuration { get; set; } = TimeSpan.FromHours(2);
+
+    public async Task<WorkflowRun> Create(RunRequest request, string ownerToken = "")
     {
         if (request.Scenario is not ("greenfield" or "brownfield" or "ambiguous") ||
             request.Provider is not ("demo" or "copilot") ||
             request.Fault is not ("none" or "expiration-once" or "expiration-always" or "provider-once"))
             throw new ArgumentException("Unknown scenario, provider or fault.");
+        if (request.Provider == "copilot" && !CopilotEnabled)
+            throw new ArgumentException("Live Copilot is disabled in public demo mode. Please select Deterministic Demo.");
         if (request.Provider != "demo" && request.Fault != "none")
             throw new ArgumentException("Fault injection is available only in explicit demo mode.");
         if (request.Fault.StartsWith("expiration") && request.Scenario != "brownfield")
@@ -38,7 +43,8 @@ public sealed class Orchestrator(RunStore store, Workspace workspace, IValidatio
                 : "Create HTTP(S) short links, redirect by code and report aggregate clicks.",
                 request.Scenario == "brownfield", false, request.Scenario != "ambiguous"),
             Status = request.Scenario == "ambiguous" ? "AwaitingClarification" : "Running",
-            Stages = Plans.Create(1, false)
+            Stages = Plans.Create(1, false),
+            OwnerToken = ownerToken
         };
         workspace.Initialize(run);
         await store.Add(run);
@@ -142,8 +148,8 @@ public sealed class Orchestrator(RunStore store, Workspace workspace, IValidatio
             {
                 foreach (var run in (await store.All()).Where(r => r.Status is "Running" or "WaitingApproval"))
                 {
-                    if (DateTimeOffset.UtcNow - run.CreatedAt > TimeSpan.FromHours(2))
-                    { await Stop(run.Id, "Two-hour wall-clock execution budget exhausted."); continue; }
+                    if (DateTimeOffset.UtcNow - run.CreatedAt > MaxRunDuration)
+                    { await Stop(run.Id, $"Execution budget of {MaxRunDuration.TotalMinutes} minutes exhausted."); continue; }
                     foreach (var stage in run.Current.Where(s => Plans.Ready(s, run)))
                     {
                         var key = run.Id + "/" + stage.Id;
@@ -167,6 +173,19 @@ public sealed class Orchestrator(RunStore store, Workspace workspace, IValidatio
                             var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                             if (_running.TryAdd(key, linked)) _ = ExecuteStage(run.Id, stage.Id, linked, key);
                         }
+                    }
+                }
+                if (MaxRunDuration < TimeSpan.FromHours(1))
+                {
+                    // In public demo mode, clean up finished run workspaces older than 30 minutes to prevent disk exhaustion
+                    foreach (var old in (await store.All()).Where(r => r.Status is "Completed" or "SafeStopped" && DateTimeOffset.UtcNow - r.UpdatedAt > TimeSpan.FromMinutes(30)))
+                    {
+                        try
+                        {
+                            var runPath = workspace.RunRoot(old.Id);
+                            if (Directory.Exists(runPath)) Directory.Delete(runPath, recursive: true);
+                        }
+                        catch { /* ignore temporary file lock errors */ }
                     }
                 }
             }
@@ -395,6 +414,7 @@ public sealed class Orchestrator(RunStore store, Workspace workspace, IValidatio
                 await Stop(id, "Fail-closed: " + message);
             }
         }
+        catch (OperationCanceledException) { /* Stale or cancelled execution during safe stop/revision */ }
         catch (Exception ex) { logger.LogError(ex, "Could not record failure for {Run}/{Stage}", id, stageId); }
     }
     private static void RequireCurrent(WorkflowRun run, int revision)

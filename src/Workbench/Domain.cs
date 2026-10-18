@@ -63,6 +63,7 @@ public sealed class WorkflowRun
     public DateTimeOffset? FinishedAt { get; set; }
     public List<Stage> Stages { get; set; } = [];
     public List<Artifact> Artifacts { get; set; } = [];
+    public string OwnerToken { get; set; } = "";
     public IEnumerable<Stage> Current => Stages.Where(s => s.Revision == Revision);
 }
 public static class Plans
@@ -113,4 +114,4 @@ public static class Plans
 }
 public sealed record AuditEntry(long Sequence, string RunId, DateTimeOffset At, string Type,
     string Node, int Revision, string Detail, string PreviousHash, string Hash);
-public sealed record RunView(WorkflowRun Run, IReadOnlyList<AuditEntry> Events, object Metrics);
+public sealed record RunView(WorkflowRun Run, IReadOnlyList<AuditEntry> Events, object Metrics, bool IsOwner = true);
